@@ -1157,9 +1157,16 @@ impl Warehouse {
             sys::rename_noreplace(&src_dir, &src.name, &dst_dir, &dst.name)
                 .map_err(|e| Self::rename_errno(&e, &dst.name))
         });
-        if let Err(f) = renamed {
+        if let Err(mut f) = renamed {
             if f.code == "ROOT_REPLACED" {
                 let _ = self.precheck(tx);
+            }
+            // Landlock refuses a rename into a folder that is no longer beneath
+            // the root (EXDEV or EACCES). Say so plainly when that's the cause.
+            if matches!(f.code, "CROSS_DEVICE" | "PERMISSION")
+                && !matches!(sys::open_dir_beneath(&self.root, &dst.dir).and_then(|fd| sys::fstat(&fd)), Ok(st) if sys::ident(&st) == dst.dir_id)
+            {
+                f = refusal("BOUNDARY_REFUSED", format!("`/{}` left the warehouse during the delivery, so the move was refused. Nothing moved.", dst.dir.join("/")));
             }
             let rec = Record {
                 op: Some(op),
@@ -1183,9 +1190,9 @@ impl Warehouse {
         };
         if escaped {
             self.frozen = Some(Freeze {
-                kind: FreezeKind::BoundaryEscape,
+                kind: FreezeKind::DestinationMoved,
                 explanation: format!(
-                    "`{}` was moved, but its destination folder no longer resolves inside the warehouse. Another program moved that folder during the delivery. PALLET stopped and changed nothing else.",
+                    "The file for `{}` was renamed, but its destination folder was renamed or replaced by another program at the same moment, so the recorded path is no longer exact. The kernel only allows the rename beneath the warehouse, so the file is inside it. PALLET stopped instead of guessing where.",
                     dst.rel()
                 ),
                 acknowledgeable: true,
@@ -1194,7 +1201,7 @@ impl Warehouse {
                 tx: tx.into(),
                 op,
                 decision: "FROZEN".into(),
-                evidence: "destination folder left the warehouse during commit".into(),
+                evidence: "destination folder was renamed or replaced during commit".into(),
             }];
             return Err(fail(refusal("UNCERTAIN", "The destination folder moved during delivery. PALLET froze; see the recovery panel.")));
         }

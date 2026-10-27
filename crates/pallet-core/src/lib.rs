@@ -8,9 +8,13 @@ pub mod names;
 pub mod sample;
 
 #[cfg(target_os = "linux")]
+pub mod confine;
+#[cfg(target_os = "linux")]
 pub mod sys;
 #[cfg(target_os = "linux")]
 pub mod warehouse;
+#[cfg(target_os = "linux")]
+pub mod worker;
 
 /// Whether this build has a real-file adapter at all. Runtime checks
 /// (filesystem type, kernel support) happen when a warehouse is opened.

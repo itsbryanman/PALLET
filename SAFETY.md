@@ -45,41 +45,64 @@ Roots PALLET refuses:
 
 | Platform | Filesystem | Real-file mode | Status |
 | --- | --- | --- | --- |
-| Linux x86_64 (kernel ≥ 5.6) | ext4 | Enabled | Adapter implemented and tested (see [docs/TEST_PLAN.md](docs/TEST_PLAN.md)) |
+| Linux x86_64 (kernel ≥ 5.19, Landlock enabled) | ext4 | Enabled | Adapter implemented and tested (see [docs/TEST_PLAN.md](docs/TEST_PLAN.md)) |
 | macOS | APFS | **Disabled** | No adapter yet. Sample warehouse only. |
 | Windows | NTFS | **Disabled** | No adapter yet. Sample warehouse only. |
 | Browser demo | none | **Never** | Virtual in-memory files. Cannot touch local files. |
 
-If support cannot be established at runtime (unsupported kernel, `openat2` blocked by a
+If support cannot be established at runtime (no Landlock ABI 2, `openat2` blocked by a
 sandbox, wrong filesystem), PALLET offers an isolated virtual sample warehouse and
 performs no real-file operations.
 
 ### How the boundary is enforced (Linux)
 
 String-prefix checks and "canonicalize, then use ordinary paths" are not used anywhere.
+Two independent kernel mechanisms do the work.
 
-1. The root is opened once as a directory handle (`O_PATH | O_DIRECTORY | O_NOFOLLOW`).
-   Its identity (device, inode) is recorded.
+**1. The warehouse thread is confined with Landlock.** Every operation on a warehouse runs
+on one dedicated worker thread. Before opening the warehouse, that thread calls
+`landlock_restrict_self` with a ruleset that handles every filesystem access right in
+Landlock ABI 2 (including `REFER`, which governs cross-directory renames) and allows them
+only beneath the warehouse root. From then on the kernel checks, inside each system call,
+that the objects involved are beneath the root *at that moment*:
+
+- A rename into a bay that another program has just moved out of the warehouse is refused
+  (`EXDEV`/`EACCES`). Nothing moves. PALLET reports `BOUNDARY_REFUSED`.
+- The check and the rename can't be separated. Cross-directory renames, including another
+  program moving a bay out, are serialized by the filesystem's rename lock, and Landlock's
+  check runs while the rename holds it.
+- Reads and writes outside the root fail on that thread, whatever path they're given.
+
+Landlock restricts only that thread. The rest of the process (the window, the WebView) is
+unaffected, and nothing in it holds a warehouse handle. If the kernel lacks Landlock ABI 2
+or Landlock isn't enabled, the ruleset can't be fully enforced and real-file mode is
+refused.
+
+**2. Paths are resolved by handle, without following links.**
+
+1. The root is opened once as a directory handle (`O_DIRECTORY | O_NOFOLLOW`). Its
+   identity (device, inode) is recorded.
 2. Every descendant is resolved relative to that handle with
    `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_XDEV)`.
    The kernel refuses `..` escapes, absolute paths, any symlink in any component, and
    crossing onto another mount.
 3. Names are validated before use: no empty names, `.`, `..`, `/`, NUL, or the reserved
    `.pallet` name at the root.
-4. Mutations use `*at` system calls on directory handles, never full path strings.
+4. Mutations use `*at` system calls on directory handles, never full path strings, so a
+   symlink swapped into a path at the last moment is never followed.
 5. At commit, the root and the involved directories are re-resolved from the root
    handle, and their identities must match what was validated. The root's original
    absolute path must still resolve to the same identity; if it does not, the
    warehouse is suspended (S4, root replaced).
 
-**Residual race, stated plainly:** Linux has no "rename only if both directories are
-still beneath this root" primitive. If another program moves a bay directory *itself*
-out of the warehouse in the microseconds between PALLET's revalidation and its rename,
-the file lands in that directory at its new location. PALLET re-checks identities
-after the rename, detects this, records it in the journal, and freezes further
-operations with an explanation. It does not try to repair it. Symlink and path-component
-substitution races are prevented, not just detected, because no path string is
-re-resolved at rename time.
+After a rename, PALLET checks once more that the destination folder still resolves to the
+same identity. If another program renamed or replaced that folder *inside* the warehouse
+at the same instant, the file is still inside the root (Landlock guarantees it), but the
+recorded path is no longer exact; PALLET freezes and explains instead of guessing.
+
+The boundary is tested by having a second, unconfined thread move a bay out of the
+warehouse, or swap in a symlink, at the exact instant before the rename
+(`crates/pallet-core/tests/boundary.rs`).
 
 ## S2 — Never destroy user content
 
@@ -224,7 +247,8 @@ A pending delivery cannot be cancelled by resetting or tipping the forklift.
 ## What is and isn't tested
 
 Tested (on Linux/ext4, in CI and locally), see [docs/TEST_PLAN.md](docs/TEST_PLAN.md):
-process termination at every commit step, journal write failure and real full-disk
+a bay moved out of the warehouse or a symlink swapped in at the instant before the
+rename, process termination at every commit step, journal write failure and real full-disk
 volumes, missing destinations, concurrent name collisions, symlink and directory
 substitution, root replacement, hard links, special files, read-only files, torn and
 corrupt journals, repeated recovery, duplicate transaction IDs, second instances,

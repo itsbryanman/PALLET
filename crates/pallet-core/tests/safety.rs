@@ -193,8 +193,10 @@ fn folder_replaced_by_lookalike_is_refused() {
 }
 
 #[test]
-fn bay_moved_outside_inside_the_residual_window_is_detected_and_freezes() {
-    // Documented residual race (SAFETY.md S1): after revalidation, before rename.
+fn post_rename_check_still_detects_a_moved_destination_without_confinement() {
+    // Defense in depth. The app always runs confined (see tests/boundary.rs, where
+    // the kernel refuses this rename outright). Unconfined, the post-rename identity
+    // check is what notices, and PALLET freezes.
     let fx = Fx::new();
     let mut w = fx.open();
     let docs = bay_id(&mut w, "Documents");
@@ -208,7 +210,7 @@ fn bay_moved_outside_inside_the_residual_window_is_detected_and_freezes() {
     let o = w.deliver("t1", &c, &docs, None, None);
     failpoint::set_hook(None);
     assert_eq!(o.status, TxStatus::Uncertain, "{o:?}");
-    assert_eq!(w.status().frozen.unwrap().kind, FreezeKind::BoundaryEscape);
+    assert_eq!(w.status().frozen.unwrap().kind, FreezeKind::DestinationMoved);
     // The file is intact (in the moved folder), exactly once.
     assert_eq!(
         fs::read(fx.outside.join("Documents/hello.txt")).unwrap(),

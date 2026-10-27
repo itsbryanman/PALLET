@@ -121,6 +121,6 @@ pub enum FreezeKind {
     CorruptJournal,
     AmbiguousTransaction,
     RootReplaced,
-    BoundaryEscape,
+    DestinationMoved,
     FlushFailed,
 }
