@@ -21,6 +21,9 @@ getrandom = "0.4.3"
 rustix = { version = "1.1.6", features = ["fs", "process"] }
 landlock = "0.4.7"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 tempfile = "3.27.0"
 proptest = "1.12.0"

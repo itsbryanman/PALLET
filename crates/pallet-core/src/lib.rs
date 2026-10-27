@@ -16,6 +16,8 @@ pub mod sys;
 pub mod warehouse;
 #[cfg(target_os = "linux")]
 pub mod worker;
+#[cfg(windows)]
+pub mod windows_proof;
 
 /// Whether this build has a real-file adapter at all. Runtime checks
 /// (filesystem type, kernel support) happen when a warehouse is opened.
