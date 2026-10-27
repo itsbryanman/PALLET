@@ -42,17 +42,22 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      # This is deliberately a native MSVC execution, not a GNU cross-check:
-      # windows_proof is cfg(windows) and fails if its single NTFS rename test
-      # is filtered out or if FileRenameInfo cannot perform a no-replace move.
+      # This is deliberately a native MSVC execution, not a GNU cross-check.
       - name: Run the native Windows handle-rename proof
         shell: pwsh
         run: |
           cargo test -p pallet-core --test windows_proof -- --nocapture 2>&1 |
             Tee-Object -FilePath windows-proof.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Select-String -Path windows-proof.log -Pattern 'running 1 test' -Quiet)) {
-            throw 'The Windows-only proof did not execute exactly one test.'
+          $required = @(
+            'native_rename_and_reverse_preserve_identity_and_bytes ... ok',
+            'native_rename_refuses_collision_without_changing_either_file ... ok',
+            'native_reverse_rename_refuses_when_original_location_is_occupied ... ok'
+          )
+          foreach ($test in $required) {
+            if (-not (Select-String -Path windows-proof.log -SimpleMatch -Pattern $test -Quiet)) {
+              throw "Required Windows native proof did not pass: $test"
+            }
           }
       - name: Build the Windows Tauri binary with MSVC
         run: cargo build -p pallet
