@@ -1,0 +1,157 @@
+{
+  "image": "forklift-atlas.png",
+  "size": {
+    "w": 2392,
+    "h": 1098
+  },
+  "source": "assets/sprites/forklift-sheet.png",
+  "headingOrder": [
+    "e",
+    "se",
+    "s",
+    "sw",
+    "w",
+    "nw",
+    "n",
+    "ne"
+  ],
+  "note": "Frames are indexed by fork direction, heading 0 = +x (east), y down. Pivot is the ground-plane chassis centre; fork is the pickup point relative to the pivot, in source pixels. Forks are lowered in every frame.",
+  "frames": {
+    "e": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 598,
+        "h": 549
+      },
+      "pivot": {
+        "x": 299,
+        "y": 289
+      },
+      "fork": {
+        "x": 212,
+        "y": -42
+      },
+      "cargoInFront": true
+    },
+    "se": {
+      "frame": {
+        "x": 598,
+        "y": 0,
+        "w": 598,
+        "h": 549
+      },
+      "pivot": {
+        "x": 299,
+        "y": 289
+      },
+      "fork": {
+        "x": 174,
+        "y": 63
+      },
+      "cargoInFront": true
+    },
+    "s": {
+      "frame": {
+        "x": 1196,
+        "y": 0,
+        "w": 598,
+        "h": 549
+      },
+      "pivot": {
+        "x": 299,
+        "y": 289
+      },
+      "fork": {
+        "x": 0,
+        "y": 185
+      },
+      "cargoInFront": true
+    },
+    "sw": {
+      "frame": {
+        "x": 1794,
+        "y": 0,
+        "w": 598,
+        "h": 549
+      },
+      "pivot": {
+        "x": 299,
+        "y": 289
+      },
+      "fork": {
+        "x": -159,
+        "y": 81
+      },
+      "cargoInFront": true
+    },
+    "w": {
+      "frame": {
+        "x": 0,
+        "y": 549,
+        "w": 598,
+        "h": 549
+      },
+      "pivot": {
+        "x": 299,
+        "y": 289
+      },
+      "fork": {
+        "x": -213,
+        "y": -41
+      },
+      "cargoInFront": true
+    },
+    "nw": {
+      "frame": {
+        "x": 598,
+        "y": 549,
+        "w": 598,
+        "h": 549
+      },
+      "pivot": {
+        "x": 299,
+        "y": 289
+      },
+      "fork": {
+        "x": -153,
+        "y": -130
+      },
+      "cargoInFront": false
+    },
+    "n": {
+      "frame": {
+        "x": 1196,
+        "y": 549,
+        "w": 598,
+        "h": 549
+      },
+      "pivot": {
+        "x": 299,
+        "y": 289
+      },
+      "fork": {
+        "x": 0,
+        "y": -238
+      },
+      "cargoInFront": false
+    },
+    "ne": {
+      "frame": {
+        "x": 1794,
+        "y": 549,
+        "w": 598,
+        "h": 549
+      },
+      "pivot": {
+        "x": 299,
+        "y": 289
+      },
+      "fork": {
+        "x": 165,
+        "y": -168
+      },
+      "cargoInFront": false
+    }
+  }
+}
