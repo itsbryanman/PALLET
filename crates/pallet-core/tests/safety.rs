@@ -9,6 +9,7 @@ use pallet_core::failpoint;
 use pallet_core::model::{FreezeKind, TxStatus};
 use pallet_core::warehouse::{check_root_policy, Warehouse};
 use std::fs;
+use std::fs::File;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::Path;
 
@@ -715,9 +716,13 @@ fn undo_refuses_occupied_or_missing_origin_and_accepts_confirmed_alternate() {
     // The moved file was replaced by a different object: refuse.
     let b = cargo(&mut w, "b.txt");
     committed(&w.deliver("t3", &b, &docs, None, None));
+    // Keep the unlinked original live so a fast filesystem cannot recycle its
+    // inode for the replacement and make this identity test nondeterministic.
+    let removed = File::open(fx.root.join("Documents/b.txt")).unwrap();
     fs::remove_file(fx.root.join("Documents/b.txt")).unwrap();
     fx.write("Documents/b.txt", b"bee\n");
     refused(&w.undo("u4", "t3", None), "SOURCE_CHANGED");
+    drop(removed);
 }
 
 #[test]

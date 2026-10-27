@@ -30,7 +30,7 @@ jobs:
       - run: cargo test --workspace
       - run: cargo test --workspace --features pallet-core/failpoints
 
-  windows-build:
+  windows-native:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
@@ -42,4 +42,25 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      # This is deliberately a native MSVC execution, not a GNU cross-check:
+      # windows_proof is cfg(windows) and fails if its single NTFS rename test
+      # is filtered out or if FileRenameInfo cannot perform a no-replace move.
+      - name: Run the native Windows handle-rename proof
+        shell: pwsh
+        run: |
+          cargo test -p pallet-core --test windows_proof -- --nocapture 2>&1 |
+            Tee-Object -FilePath windows-proof.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -Path windows-proof.log -Pattern 'running 1 test' -Quiet)) {
+            throw 'The Windows-only proof did not execute exactly one test.'
+          }
+      - name: Build the Windows Tauri binary with MSVC
+        run: cargo build -p pallet
       - run: cargo check --workspace
+      - name: Upload Windows native-test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-test-output
+          path: windows-proof.log
+          if-no-files-found: warn
