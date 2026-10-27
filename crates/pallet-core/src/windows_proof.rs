@@ -33,6 +33,7 @@ struct RenameHeader {
     _padding: [u8; 7],
     root_directory: HANDLE,
     file_name_length: u32,
+    file_name: [u16; 0],
 }
 
 #[link(name = "ntdll")]
@@ -144,7 +145,8 @@ pub fn rename_open_file_noreplace(
         .len()
         .checked_mul(size_of::<u16>())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "destination name too long"))?;
-    let submitted_len = size_of::<RenameHeader>()
+    let file_name_offset = offset_of!(RenameHeader, file_name);
+    let submitted_len = file_name_offset
         .checked_add(name_bytes)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "rename buffer overflow"))?;
     let submitted_len = u32::try_from(submitted_len)
@@ -153,6 +155,7 @@ pub fn rename_open_file_noreplace(
     assert_eq!(align_of::<RenameHeader>(), align_of::<usize>());
     assert_eq!(offset_of!(RenameHeader, root_directory), 8);
     assert_eq!(offset_of!(RenameHeader, file_name_length), 16);
+    assert_eq!(file_name_offset, 20);
     assert_eq!(size_of::<RenameHeader>(), 24);
 
     let source = Handle::open(
@@ -174,7 +177,7 @@ pub fn rename_open_file_noreplace(
         (*info).file_name_length = name_bytes as u32;
         std::ptr::copy_nonoverlapping(
             utf16.as_ptr(),
-            storage.as_mut_ptr().add(size_of::<RenameHeader>()).cast(),
+            storage.as_mut_ptr().add(file_name_offset).cast(),
             utf16.len(),
         );
     }
