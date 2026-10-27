@@ -77,8 +77,14 @@ pub fn rename_open_file_noreplace(source: &Path, destination_dir: &Path, name: &
     )?;
     let utf16: Vec<u16> = OsStr::new(name).encode_wide().collect();
     let bytes = (utf16.len() * size_of::<u16>()) as u32;
+    // FILE_RENAME_INFO ends with a one-WCHAR placeholder, but Rust rounds the
+    // structure itself up to pointer alignment. Windows validates the full
+    // `sizeof(INFO) - sizeof(WCHAR) + FileNameLength` layout, including that
+    // trailing alignment, rather than the byte offset of FileName alone.
     let base = offset_of!(FILE_RENAME_INFO, FileName);
-    let mut record = vec![0u8; base + bytes as usize];
+    let record_len = size_of::<FILE_RENAME_INFO>() - size_of::<u16>() + bytes as usize;
+    debug_assert!(record_len >= base + bytes as usize);
+    let mut record = vec![0u8; record_len];
     let info = record.as_mut_ptr() as *mut FILE_RENAME_INFO;
     unsafe {
         (*info).Anonymous = FILE_RENAME_INFO_0 { ReplaceIfExists: false };
