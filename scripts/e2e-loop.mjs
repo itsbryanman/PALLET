@@ -67,8 +67,9 @@ export default async function run(page, { shots, fsSnap, afterDelivery } = {}) {
   await p.goto(h2.x + 150, h2.y, { reverse: true, tol: 12 });
   await p.goto(h2.x + 260, h2.y - 20, { tol: 14, careful: true });
   await p.hold(["KeyW"], 900);
-  void p.hold(["KeyW", "KeyA"], 2500);
+  const turning = p.hold(["KeyW", "KeyA"], 2500).catch(() => {});
   await page.waitForSelector("#incident[open]", { timeout: 6000 });
+  await turning;
   await p.release();
   if (shots) await shots("incident");
   const report = await page.textContent("#incident");

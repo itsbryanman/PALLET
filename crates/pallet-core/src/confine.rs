@@ -24,7 +24,9 @@ use std::os::fd::AsFd;
 pub fn confine_current_thread(root: impl AsFd) -> Result<(), String> {
     let abi = ABI::V2;
     let access = AccessFs::from_all(abi);
-    let fail = |e: &dyn std::fmt::Display| format!("Landlock confinement isn't available ({e}). Real-file mode needs Linux 5.19+ with Landlock enabled.");
+    let fail = |e: &dyn std::fmt::Display| {
+        format!("Landlock confinement isn't available ({e}). Real-file mode needs Linux 5.19+ with Landlock enabled.")
+    };
     let status = Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
         .handle_access(access)

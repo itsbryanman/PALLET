@@ -27,10 +27,30 @@ fn main() {
     let out = w
         .run(move |w| {
             let floor = w.list_floor(None).expect("list root");
-            let find_cargo = |name: &str| floor.cargo.iter().find(|c| c.name == name).map(|c| c.id.clone()).expect("cargo");
-            let find_bay = |name: &str| floor.bays.iter().find(|b| b.name == name).map(|b| b.id.clone()).expect("bay");
+            let find_cargo = |name: &str| {
+                floor
+                    .cargo
+                    .iter()
+                    .find(|c| c.name == name)
+                    .map(|c| c.id.clone())
+                    .expect("cargo")
+            };
+            let find_bay = |name: &str| {
+                floor
+                    .bays
+                    .iter()
+                    .find(|b| b.name == name)
+                    .map(|b| b.id.clone())
+                    .expect("bay")
+            };
             match cmd.as_str() {
-                "move" => w.deliver(&rest[0], &find_cargo(&rest[1]), &find_bay(&rest[2]), None, None),
+                "move" => w.deliver(
+                    &rest[0],
+                    &find_cargo(&rest[1]),
+                    &find_bay(&rest[2]),
+                    None,
+                    None,
+                ),
                 "copy" => w.duplicate(&rest[0], &find_cargo(&rest[1]), None),
                 "incident" => w.save_incident(&rest[0], "Cargo: hello.txt\nFiles damaged: 0\n"),
                 "undo" => w.undo(&rest[0], &rest[1], None),

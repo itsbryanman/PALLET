@@ -6,13 +6,11 @@ use crate::failpoint;
 use crate::journal::{Damage, Fingerprint, Ident, Journal, Kind, Record};
 use crate::model::*;
 use crate::names::{self, META_DIR, RECOVERED_COPIES};
-use crate::sys;
-use rustix::fd::OwnedFd;
-use rustix::fs::FileType;
+use crate::platform::{Errc, Kind as Obj};
+use crate::sys::{self, Dir};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -181,11 +179,11 @@ pub fn check_root_policy(root: &Path, home: Option<&Path>) -> Result<(), OpenErr
 
 pub struct Warehouse {
     root_path: PathBuf,
-    root: OwnedFd,
+    root: Dir,
     root_id: Ident,
-    meta: OwnedFd,
-    tmp: OwnedFd,
-    evidence: OwnedFd,
+    meta: Dir,
+    tmp: Dir,
+    evidence: Dir,
     _lock: File,
     journal: Journal,
     records: Vec<Record>,
@@ -210,7 +208,7 @@ impl Warehouse {
     /// Resolves and policy-checks a chosen folder, then opens it exactly once
     /// (no symlink in the last component). Everything after this, including the
     /// Landlock rule in `worker`, uses this one handle, never the path again.
-    pub fn bind(path: &Path) -> Result<(PathBuf, OwnedFd), OpenError> {
+    pub fn bind(path: &Path) -> Result<(PathBuf, Dir), OpenError> {
         let canonical = std::fs::canonicalize(path)
             .map_err(|e| open_err("ROOT_MISSING", format!("Can't open that folder: {e}.")))?;
         let home = std::env::var_os("HOME")
@@ -223,19 +221,13 @@ impl Warehouse {
     }
 
     /// Opens a warehouse on a handle from [`Warehouse::bind`].
-    pub fn open_at(canonical: PathBuf, root: OwnedFd, sample: bool) -> Result<Warehouse, OpenError> {
+    pub fn open_at(canonical: PathBuf, root: Dir, sample: bool) -> Result<Warehouse, OpenError> {
         let st = sys::fstat(&root).map_err(|e| open_err("IO", e.to_string()))?;
-        if sys::file_type(&st) != FileType::Directory {
+        if st.kind != Obj::Dir {
             return Err(open_err("ROOT_REFUSED", "That isn't a folder."));
         }
-        let root_id = sys::ident(&st);
-        let magic = sys::fs_magic(&root).map_err(|e| open_err("IO", e.to_string()))?;
-        if magic != sys::EXT4_MAGIC {
-            return Err(open_err(
-                "UNSUPPORTED_FS",
-                format!("This folder is on a filesystem PALLET hasn't been tested on (type 0x{magic:x}). Real-file mode supports ext4 only."),
-            ));
-        }
+        let root_id = st.id;
+        sys::fs_check(&root).map_err(|m| open_err("UNSUPPORTED_FS", m))?;
         if sys::is_casefold(&root).unwrap_or(true) {
             return Err(open_err(
                 "UNSUPPORTED_FS",
@@ -258,7 +250,7 @@ impl Warehouse {
             ));
         }
 
-        let mkdir = |dir: &OwnedFd, name: &str, rel: &[String]| -> Result<OwnedFd, OpenError> {
+        let mkdir = |dir: &Dir, name: &str, rel: &[String]| -> Result<Dir, OpenError> {
             sys::mkdir_at(dir, name, 0o700)
                 .map_err(|e| open_err("IO", format!("Can't create {name}: {e}")))?;
             sys::open_dir_beneath(&root, rel).map_err(|e| {
@@ -423,7 +415,7 @@ impl Warehouse {
             Err(e) => return Err(format!("can't open the folder of `{rel}`: {e}")),
         };
         match sys::lstat_at(&dirfd, &name) {
-            Ok(st) => Ok(sys::ident(&st) == id && sys::file_type(&st) == FileType::RegularFile),
+            Ok(st) => Ok(st.id == id && st.kind == Obj::File),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(format!("can't inspect `{rel}`: {e}")),
         }
@@ -437,7 +429,7 @@ impl Warehouse {
             .filter(|n| names::validate(n, false).is_ok())
             .ok_or_else(|| format!("journal temp path `{tmp_rel}` is not in .pallet/tmp"))?;
         match sys::lstat_at(&self.tmp, name) {
-            Ok(st) => Ok(sys::ident(&st) == id && sys::file_type(&st) == FileType::RegularFile),
+            Ok(st) => Ok(st.id == id && st.kind == Obj::File),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(format!("can't inspect `{tmp_rel}`: {e}")),
         }
@@ -655,18 +647,20 @@ impl Warehouse {
         dir: &[String],
         id: Ident,
         missing: &'static str,
-    ) -> Result<OwnedFd, Refusal> {
-        let fd = sys::open_dir_beneath(&self.root, dir).map_err(|e| match e.raw_os_error() {
-            Some(2) | Some(20) => refusal(missing, format!("`/{}` is gone.", dir.join("/"))),
-            Some(40) => refusal(
+    ) -> Result<Dir, Refusal> {
+        let fd = sys::open_dir_beneath(&self.root, dir).map_err(|e| match sys::classify(&e) {
+            Errc::NotFound => refusal(missing, format!("`/{}` is gone.", dir.join("/"))),
+            Errc::Loop => refusal(
                 "LINK_IN_PATH",
                 format!("`/{}` now goes through a link. Refused.", dir.join("/")),
             ),
-            Some(18) => refusal("CROSS_DEVICE", "That folder is on another device. Refused."),
+            Errc::CrossDevice => {
+                refusal("CROSS_DEVICE", "That folder is on another device. Refused.")
+            }
             _ => refusal("IO", format!("Can't open `/{}`: {e}", dir.join("/"))),
         })?;
         let st = sys::fstat(&fd).map_err(|e| refusal("IO", e.to_string()))?;
-        if sys::ident(&st) != id {
+        if st.id != id {
             return Err(refusal(
                 missing,
                 format!("`/{}` was replaced by a different folder.", dir.join("/")),
@@ -686,7 +680,7 @@ impl Warehouse {
         names
             .iter()
             .take(2000)
-            .filter(|(n, _)| matches!(sys::lstat_at(&fd, n), Ok(st) if sys::file_type(&st) == FileType::RegularFile))
+            .filter(|(n, _)| matches!(sys::lstat_at(&fd, n), Ok(st) if st.kind == Obj::File))
             .count() as u32
     }
 
@@ -720,13 +714,13 @@ impl Warehouse {
             let Ok(st) = sys::lstat_at(&dir, &name) else {
                 continue;
             };
-            let id = sys::ident(&st);
-            let ft = sys::file_type(&st);
+            let id = st.id;
+            let ft = st.kind;
             let mut path = bay_ref.path.clone();
             path.push(name.clone());
             let unavailable = |reason: &str| Some(reason.to_string());
             match ft {
-                FileType::Directory => {
+                Obj::Dir => {
                     let reason = if !utf8 {
                         unavailable("name isn't UTF-8")
                     } else if id.dev != self.root_id.dev {
@@ -754,12 +748,12 @@ impl Warehouse {
                         items,
                     });
                 }
-                FileType::RegularFile => {
+                Obj::File => {
                     let reason = if !utf8 {
                         unavailable("name isn't UTF-8")
-                    } else if st.st_nlink > 1 {
+                    } else if st.links > 1 {
                         unavailable("hard-linked")
-                    } else if st.st_mode & 0o200 == 0 {
+                    } else if !st.writable {
                         unavailable("read-only")
                     } else {
                         None
@@ -769,9 +763,9 @@ impl Warehouse {
                         dir_id: bay_ref.id,
                         name: name.clone(),
                         id,
-                        fp: sys::fingerprint(&st),
+                        fp: st.fingerprint(),
                     };
-                    let bytes = st.st_size as u64;
+                    let bytes = st.size;
                     let cid = self.cargo_id_for(c);
                     cargo.push(CargoInfo {
                         id: cid,
@@ -783,10 +777,8 @@ impl Warehouse {
                 }
                 other => {
                     let what = match other {
-                        FileType::Symlink => "link",
-                        FileType::Fifo => "pipe",
-                        FileType::Socket => "socket",
-                        FileType::CharacterDevice | FileType::BlockDevice => "device",
+                        Obj::Link => "link",
+                        Obj::Other(w) => w,
                         _ => "special file",
                     };
                     // Unavailable entries get a throwaway ID; they can't be cargo.
@@ -819,7 +811,7 @@ impl Warehouse {
             if let Ok(fd) = sys::open_dir_beneath(&self.root, &prefix) {
                 if let Ok(st) = sys::fstat(&fd) {
                     let name = prefix.last().cloned().unwrap_or_default();
-                    let id = self.bay_id_for(prefix, sys::ident(&st));
+                    let id = self.bay_id_for(prefix, st.id);
                     breadcrumbs.push(BayInfo {
                         id,
                         name,
@@ -931,7 +923,7 @@ impl Warehouse {
         }
         // S4: never silently follow a new directory at the old pathname.
         match sys::lstat_path(&self.root_path) {
-            Ok(st) if sys::ident(&st) == self.root_id => Ok(()),
+            Ok(st) if st.id == self.root_id => Ok(()),
             _ => {
                 self.frozen = Some(Freeze {
                     kind: FreezeKind::RootReplaced,
@@ -967,7 +959,7 @@ impl Warehouse {
 
     fn free_name(
         &self,
-        dir: &OwnedFd,
+        dir: &Dir,
         base: &str,
         make: impl Fn(&str, u32) -> String,
     ) -> Option<String> {
@@ -980,7 +972,7 @@ impl Warehouse {
     /// Validates the source entry at `src` against what was loaded.
     fn check_source(
         &self,
-        dir: &OwnedFd,
+        dir: &Dir,
         name: &str,
         expect: Ident,
         fp: Option<Fingerprint>,
@@ -992,31 +984,31 @@ impl Warehouse {
             ),
             _ => refusal("IO", e.to_string()),
         })?;
-        if sys::file_type(&st) != FileType::RegularFile {
+        if st.kind != Obj::File {
             return Err(refusal(
                 "NOT_REGULAR",
                 format!("`{name}` isn't a regular file anymore."),
             ));
         }
-        if sys::ident(&st) != expect {
+        if st.id != expect {
             return Err(refusal(
                 "SOURCE_CHANGED",
                 format!("`{name}` was replaced by a different file."),
             ));
         }
-        if fp.is_some_and(|fp| fp != sys::fingerprint(&st)) {
+        if fp.is_some_and(|fp| fp != st.fingerprint()) {
             return Err(refusal(
                 "SOURCE_CHANGED",
                 format!("`{name}` changed while you were driving. Reload the floor."),
             ));
         }
-        if st.st_nlink > 1 {
+        if st.links > 1 {
             return Err(refusal(
                 "HARD_LINKED",
                 format!("`{name}` has other hard links."),
             ));
         }
-        if st.st_mode & 0o200 == 0 {
+        if !st.writable {
             return Err(refusal(
                 "READ_ONLY",
                 format!("`{name}` is read-only. PALLET doesn't change permissions."),
@@ -1025,9 +1017,9 @@ impl Warehouse {
         Ok(())
     }
 
-    fn check_dest_dir(&self, dir: &OwnedFd) -> Result<(), Refusal> {
+    fn check_dest_dir(&self, dir: &Dir) -> Result<(), Refusal> {
         let st = sys::fstat(dir).map_err(|e| refusal("IO", e.to_string()))?;
-        if st.st_dev as u64 != self.root_id.dev {
+        if st.id.dev != self.root_id.dev {
             return Err(refusal(
                 "CROSS_DEVICE",
                 "That bay is on another device. Cross-drive moves aren't supported.",
@@ -1045,7 +1037,7 @@ impl Warehouse {
         Ok(())
     }
 
-    fn check_free_name(&self, dir: &OwnedFd, name: &str, at_root: bool) -> Result<(), Refusal> {
+    fn check_free_name(&self, dir: &Dir, name: &str, at_root: bool) -> Result<(), Refusal> {
         names::validate(name, at_root).map_err(|e| refusal("BAD_NAME", e.message()))?;
         match sys::lstat_at(dir, name) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -1061,29 +1053,33 @@ impl Warehouse {
     }
 
     fn rename_errno(e: &io::Error, name: &str) -> Refusal {
-        match e.raw_os_error() {
-            Some(17) => refusal(
+        match sys::classify(e) {
+            Errc::Exists => refusal(
                 "NAME_EXISTS",
                 format!("`{name}` appeared at the destination just now. Nothing was replaced."),
             ),
-            Some(18) => refusal(
+            Errc::CrossDevice => refusal(
                 "CROSS_DEVICE",
                 "Cross-device move refused. PALLET doesn't copy-then-delete.",
             ),
-            Some(22) => refusal(
+            Errc::Unsupported => refusal(
                 "UNSUPPORTED_FS",
                 "This filesystem doesn't support no-replace renames. Refused.",
             ),
-            Some(2) => refusal(
+            Errc::NotFound => refusal(
                 "SOURCE_MISSING",
                 "The file or a folder disappeared before the move.",
             ),
-            Some(13) | Some(1) => refusal(
+            Errc::Permission => refusal(
                 "PERMISSION",
                 "Permission denied. PALLET doesn't change permissions.",
             ),
-            Some(28) => refusal("DISK_FULL", "The disk is full."),
-            Some(30) => refusal("READ_ONLY_FS", "The filesystem is read-only."),
+            Errc::NoSpace => refusal("DISK_FULL", "The disk is full."),
+            Errc::ReadOnlyFs => refusal("READ_ONLY_FS", "The filesystem is read-only."),
+            Errc::Busy => refusal(
+                "FILE_IN_USE",
+                "Another program has this file open in a way that blocks moving it. PALLET won't force it closed.",
+            ),
             _ => refusal("IO", format!("The move failed: {e}")),
         }
     }
@@ -1150,8 +1146,7 @@ impl Warehouse {
 
         // Revalidate right before the rename.
         let revalidated = (|| {
-            if !matches!(sys::lstat_path(&self.root_path), Ok(st) if sys::ident(&st) == self.root_id)
-            {
+            if !matches!(sys::lstat_path(&self.root_path), Ok(st) if st.id == self.root_id) {
                 return Err(refusal(
                     "ROOT_REPLACED",
                     "The warehouse folder was moved or replaced.",
@@ -1176,7 +1171,7 @@ impl Warehouse {
             // Landlock refuses a rename into a folder that is no longer beneath
             // the root (EXDEV or EACCES). Say so plainly when that's the cause.
             if matches!(f.code, "CROSS_DEVICE" | "PERMISSION")
-                && !matches!(sys::open_dir_beneath(&self.root, &dst.dir).and_then(|fd| sys::fstat(&fd)), Ok(st) if sys::ident(&st) == dst.dir_id)
+                && !matches!(sys::open_dir_beneath(&self.root, &dst.dir).and_then(|fd| sys::fstat(&fd)), Ok(st) if st.id == dst.dir_id)
             {
                 f = refusal("BOUNDARY_REFUSED", format!("`/{}` left the warehouse during the delivery, so the move was refused. Nothing moved.", dst.dir.join("/")));
             }
@@ -1195,8 +1190,8 @@ impl Warehouse {
         // The rename happened. Confirm the object is where we put it, still beneath the root.
         let escaped = match sys::open_dir_beneath(&self.root, &dst.dir) {
             Ok(fd) => {
-                !matches!(sys::fstat(&fd), Ok(st) if sys::ident(&st) == dst.dir_id)
-                    || !matches!(sys::lstat_at(&fd, &dst.name), Ok(st) if sys::ident(&st) == expect)
+                !matches!(sys::fstat(&fd), Ok(st) if st.id == dst.dir_id)
+                    || !matches!(sys::lstat_at(&fd, &dst.name), Ok(st) if st.id == expect)
             }
             Err(_) => true,
         };
@@ -1450,9 +1445,9 @@ impl Warehouse {
                         },
                     )?;
                     let _ = sys::fsync(&w.root);
-                    let bay_id = sys::ident(
-                        &sys::fstat(&bay).map_err(|e| (refusal("IO", e.to_string()), None))?,
-                    );
+                    let bay_id = sys::fstat(&bay)
+                        .map_err(|e| (refusal("IO", e.to_string()), None))?
+                        .id;
                     let dest = Loc {
                         dir: vec![RECOVERED_COPIES.into()],
                         dir_id: bay_id,
@@ -1532,14 +1527,8 @@ impl Warehouse {
                 refusal("IO", format!("Couldn't flush the output: {e}")),
             );
         }
-        let tmp_id = match file.metadata() {
-            Ok(m) => {
-                use std::os::unix::fs::MetadataExt;
-                Ident {
-                    dev: m.dev(),
-                    ino: m.ino(),
-                }
-            }
+        let tmp_id = match sys::file_meta(&file) {
+            Ok(m) => m.id,
             Err(e) => return failed(self, refusal("IO", e.to_string())),
         };
         let staged = Record {
@@ -1627,20 +1616,11 @@ impl Warehouse {
             };
             let mut source = sys::open_file_ro(&src_dir, &c.name)
                 .map_err(|e| (refusal("IO", e.to_string()), None))?;
-            let st = source
-                .metadata()
-                .map_err(|e| (refusal("IO", e.to_string()), None))?;
-            let mode = {
-                use std::os::unix::fs::MetadataExt;
-                if (Ident {
-                    dev: st.dev(),
-                    ino: st.ino(),
-                }) != c.id
-                {
-                    return Err((refusal("SOURCE_CHANGED", "The file was replaced."), None));
-                }
-                st.mode() & 0o777
-            };
+            let st = sys::file_meta(&source).map_err(|e| (refusal("IO", e.to_string()), None))?;
+            if st.id != c.id {
+                return Err((refusal("SOURCE_CHANGED", "The file was replaced."), None));
+            }
+            let mode = sys::file_mode(&source).map_err(|e| (refusal("IO", e.to_string()), None))?;
             let dst = Loc {
                 dir: c.dir.clone(),
                 dir_id: c.dir_id,
@@ -1656,8 +1636,8 @@ impl Warehouse {
             };
             let fp = c.fp;
             let mut fill = |out: &mut File| -> Result<String, Refusal> {
-                let io_err = |e: io::Error| match e.raw_os_error() {
-                    Some(28) => refusal(
+                let io_err = |e: io::Error| match sys::classify(&e) {
+                    Errc::NoSpace => refusal(
                         "DISK_FULL",
                         "The disk filled up during the copy. The original is untouched.",
                     ),
@@ -1681,14 +1661,8 @@ impl Warehouse {
                 failpoint::hit("copy_after_stream");
                 out.sync_all().map_err(io_err)?;
                 // Stable snapshot check: same identity, size, and mtime; same bytes on a second read.
-                let after = source.metadata().map_err(io_err)?;
                 {
-                    use std::os::unix::fs::MetadataExt;
-                    let now = Fingerprint {
-                        size: after.size(),
-                        mtime_ns: after.mtime() as i128 * 1_000_000_000
-                            + after.mtime_nsec() as i128,
-                    };
+                    let now = sys::file_meta(&source).map_err(io_err)?.fingerprint();
                     if now != fp {
                         return Err(refusal(
                             "SOURCE_CHANGED",
@@ -1701,7 +1675,7 @@ impl Warehouse {
                     let mut buf = vec![0u8; 1 << 20];
                     let mut off = 0u64;
                     while off < len {
-                        let n = f.read_at(&mut buf, off)?;
+                        let n = sys::read_at(f, &mut buf, off)?;
                         if n == 0 {
                             break;
                         }
@@ -1725,7 +1699,7 @@ impl Warehouse {
                         "The copy didn't read back identically. It was not published.",
                     ));
                 }
-                sys::fchmod(out, mode).map_err(io_err)?;
+                sys::set_mode(out, mode).map_err(io_err)?;
                 Ok(h1.to_hex().to_string())
             };
             w.stage_and_publish(tx, Op::Copy, dst, prepared, &mut fill)
@@ -1758,7 +1732,7 @@ impl Warehouse {
     }
 
     #[doc(hidden)]
-    pub fn meta_fd(&self) -> &OwnedFd {
+    pub fn meta_fd(&self) -> &Dir {
         &self.meta
     }
 }

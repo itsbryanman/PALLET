@@ -27,7 +27,10 @@ impl Worker {
             .name("pallet-warehouse".into())
             .spawn(move || {
                 if let Err(message) = confine::confine_current_thread(root.as_fd()) {
-                    let _ = ready_tx.send(Err(OpenError { code: "NO_CONFINEMENT", message }));
+                    let _ = ready_tx.send(Err(OpenError {
+                        code: "NO_CONFINEMENT",
+                        message,
+                    }));
                     return;
                 }
                 let mut w = match Warehouse::open_at(canonical, root, sample) {
@@ -42,28 +45,45 @@ impl Worker {
                     job(&mut w);
                 }
             })
-            .map_err(|e| OpenError { code: "IO", message: e.to_string() })?;
+            .map_err(|e| OpenError {
+                code: "IO",
+                message: e.to_string(),
+            })?;
         match ready_rx.recv() {
-            Ok(Ok(())) => Ok(Worker { tx: Some(tx), thread: Some(thread) }),
+            Ok(Ok(())) => Ok(Worker {
+                tx: Some(tx),
+                thread: Some(thread),
+            }),
             Ok(Err(e)) => {
                 let _ = thread.join();
                 Err(e)
             }
             Err(_) => {
                 let _ = thread.join();
-                Err(OpenError { code: "IO", message: "The warehouse worker stopped while opening.".into() })
+                Err(OpenError {
+                    code: "IO",
+                    message: "The warehouse worker stopped while opening.".into(),
+                })
             }
         }
     }
 
     /// Runs `f` on the confined worker thread and waits for its result.
-    pub fn run<R: Send + 'static>(&self, f: impl FnOnce(&mut Warehouse) -> R + Send + 'static) -> Result<R, String> {
+    pub fn run<R: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut Warehouse) -> R + Send + 'static,
+    ) -> Result<R, String> {
         let (rtx, rrx) = mpsc::channel();
         let job: Job = Box::new(move |w| {
             let _ = rtx.send(f(w));
         });
-        self.tx.as_ref().ok_or("worker closed")?.send(job).map_err(|_| "The warehouse worker stopped.".to_string())?;
-        rrx.recv().map_err(|_| "The warehouse worker stopped while handling a request.".to_string())
+        self.tx
+            .as_ref()
+            .ok_or("worker closed")?
+            .send(job)
+            .map_err(|_| "The warehouse worker stopped.".to_string())?;
+        rrx.recv()
+            .map_err(|_| "The warehouse worker stopped while handling a request.".to_string())
     }
 }
 

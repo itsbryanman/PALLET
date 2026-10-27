@@ -78,13 +78,27 @@ fn a_bay_moved_out_right_before_the_rename_is_refused_by_the_kernel() {
     let (c, docs) = ids(&w, "hello.txt", "Documents");
     let (root, out): (PathBuf, PathBuf) = (fx.root.clone(), fx.outside.clone());
     // After PALLET's own revalidation, immediately before renameat2.
-    interfere_at(&w, "move_before_rename", move || fs::rename(root.join("Documents"), out.join("Documents")).unwrap());
-    let o = w.run(move |w| w.deliver("t1", &c, &docs, None, None)).unwrap();
+    interfere_at(&w, "move_before_rename", move || {
+        fs::rename(root.join("Documents"), out.join("Documents")).unwrap()
+    });
+    let o = w
+        .run(move |w| w.deliver("t1", &c, &docs, None, None))
+        .unwrap();
     assert_eq!(o.status, TxStatus::Refused, "{o:?}");
     assert_eq!(o.code.as_deref(), Some("BOUNDARY_REFUSED"), "{o:?}");
-    assert_eq!(fs::read(fx.root.join("hello.txt")).unwrap(), b"hello\n", "file never left");
-    assert!(!fx.outside.join("Documents/hello.txt").exists(), "nothing landed outside");
-    assert!(w.run(|w| w.status().frozen.is_none()).unwrap(), "a refusal, not an ambiguous state");
+    assert_eq!(
+        fs::read(fx.root.join("hello.txt")).unwrap(),
+        b"hello\n",
+        "file never left"
+    );
+    assert!(
+        !fx.outside.join("Documents/hello.txt").exists(),
+        "nothing landed outside"
+    );
+    assert!(
+        w.run(|w| w.status().frozen.is_none()).unwrap(),
+        "a refusal, not an ambiguous state"
+    );
     // Put the bay back: everything inside is exactly as before.
     fs::rename(fx.outside.join("Documents"), fx.root.join("Documents")).unwrap();
     assert_eq!(fx.snap(), before);
@@ -101,13 +115,22 @@ fn a_symlink_swapped_in_right_before_the_rename_cannot_redirect_it() {
         fs::rename(root.join("Documents"), root.join("Documents.real")).unwrap();
         std::os::unix::fs::symlink(&out, root.join("Documents")).unwrap();
     });
-    let o = w.run(move |w| w.deliver("t1", &c, &docs, None, None)).unwrap();
+    let o = w
+        .run(move |w| w.deliver("t1", &c, &docs, None, None))
+        .unwrap();
     // The held directory handle still names the real folder (now Documents.real),
     // which is inside the warehouse; the symlink is never followed. The recorded
     // path no longer matches, so PALLET freezes rather than guess.
     assert_eq!(o.status, TxStatus::Uncertain, "{o:?}");
-    assert_eq!(fx.outside_snap(), outside, "nothing reached the symlink target");
-    assert_eq!(fs::read(fx.root.join("Documents.real/hello.txt")).unwrap(), b"hello\n");
+    assert_eq!(
+        fx.outside_snap(),
+        outside,
+        "nothing reached the symlink target"
+    );
+    assert_eq!(
+        fs::read(fx.root.join("Documents.real/hello.txt")).unwrap(),
+        b"hello\n"
+    );
     let kind = w.run(|w| w.status().frozen.map(|f| f.kind)).unwrap();
     assert_eq!(kind, Some(pallet_core::model::FreezeKind::DestinationMoved));
 }
@@ -118,13 +141,18 @@ fn normal_work_is_unaffected_by_confinement() {
     let before = fx.snap();
     let w = open(&fx);
     let (c, docs) = ids(&w, "hello.txt", "Documents");
-    let o = w.run(move |w| w.deliver("t1", &c, &docs, None, None)).unwrap();
+    let o = w
+        .run(move |w| w.deliver("t1", &c, &docs, None, None))
+        .unwrap();
     committed(&o);
     committed(&w.run(|w| w.undo("u1", "t1", None)).unwrap());
     assert_eq!(fx.snap(), before);
     let (b, _) = ids(&w, "b.txt", "Documents");
     committed(&w.run(move |w| w.duplicate("c1", &b, None)).unwrap());
-    committed(&w.run(|w| w.save_incident("i1", "Files damaged: 0\n")).unwrap());
+    committed(
+        &w.run(|w| w.save_incident("i1", "Files damaged: 0\n"))
+            .unwrap(),
+    );
     committed(&w.run(|w| w.undo("u2", "c1", None)).unwrap());
     assert!(fx.root.join("Recovered Copies/b (copy).txt").exists());
 }
@@ -151,11 +179,20 @@ fn confinement_follows_the_bound_folder_not_its_old_path() {
     let (into_impostor, into_original) = std::thread::spawn(move || {
         use std::os::fd::AsFd;
         pallet_core::confine::confine_current_thread(root.as_fd()).unwrap();
-        (fs::write(impostor.join("x"), b"x").is_ok(), fs::write(original.join("x"), b"x").is_ok())
+        (
+            fs::write(impostor.join("x"), b"x").is_ok(),
+            fs::write(original.join("x"), b"x").is_ok(),
+        )
     })
     .join()
     .unwrap();
-    assert!(!into_impostor, "the impostor at the old path is outside the rule");
-    assert!(into_original, "the bound directory is the one that's allowed");
+    assert!(
+        !into_impostor,
+        "the impostor at the old path is outside the rule"
+    );
+    assert!(
+        into_original,
+        "the bound directory is the one that's allowed"
+    );
     let _ = canonical;
 }

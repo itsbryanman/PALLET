@@ -5,7 +5,16 @@ import { writeFileSync } from "node:fs";
 export async function openApp(application, { port = 4444 } = {}) {
   const base = `http://127.0.0.1:${port}`;
   const call = async (method, path, body) => {
-    const res = await fetch(base + path, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    const what = typeof body?.script === "string" ? body.script.slice(body.script.indexOf("((") , body.script.indexOf("((") + 90).replace(/\s+/g, " ") : path;
+    if (process.env.WD_TRACE) console.log("[wd]", method, what);
+    const res = await fetch(base + path, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(120000),
+    }).catch((err) => {
+      throw new Error(`WebDriver ${method} ${what} failed: ${err.message}`);
+    });
     const json = await res.json();
     if (json.value && json.value.error) throw new Error(`${json.value.error}: ${json.value.message}`);
     return json.value;

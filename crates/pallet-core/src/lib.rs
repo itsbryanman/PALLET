@@ -5,6 +5,7 @@ pub mod failpoint;
 pub mod journal;
 pub mod model;
 pub mod names;
+pub mod platform;
 pub mod sample;
 
 #[cfg(target_os = "linux")]

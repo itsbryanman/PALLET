@@ -210,7 +210,10 @@ fn post_rename_check_still_detects_a_moved_destination_without_confinement() {
     let o = w.deliver("t1", &c, &docs, None, None);
     failpoint::set_hook(None);
     assert_eq!(o.status, TxStatus::Uncertain, "{o:?}");
-    assert_eq!(w.status().frozen.unwrap().kind, FreezeKind::DestinationMoved);
+    assert_eq!(
+        w.status().frozen.unwrap().kind,
+        FreezeKind::DestinationMoved
+    );
     // The file is intact (in the moved folder), exactly once.
     assert_eq!(
         fs::read(fx.outside.join("Documents/hello.txt")).unwrap(),

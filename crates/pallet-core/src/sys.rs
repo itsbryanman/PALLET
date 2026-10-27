@@ -4,7 +4,8 @@
 //! Mutations are `*at` calls on directory handles. No path string is
 //! re-resolved at rename time.
 
-use crate::journal::{Fingerprint, Ident};
+use crate::journal::Ident;
+use crate::platform::{Errc, Kind, Meta};
 use rustix::fd::OwnedFd;
 use rustix::fs::{
     self, Access, AtFlags, FileType, FlockOperation, Mode, OFlags, RenameFlags, ResolveFlags, Stat,
@@ -32,23 +33,74 @@ fn err(e: rustix::io::Errno) -> io::Error {
     io::Error::from_raw_os_error(e.raw_os_error())
 }
 
-pub fn ident(st: &Stat) -> Ident {
+/// A directory handle. Every descendant is reached through one of these.
+pub type Dir = OwnedFd;
+
+fn meta(st: &Stat) -> Meta {
+    let kind = match FileType::from_raw_mode(st.st_mode) {
+        FileType::RegularFile => Kind::File,
+        FileType::Directory => Kind::Dir,
+        FileType::Symlink => Kind::Link,
+        FileType::Fifo => Kind::Other("pipe"),
+        FileType::Socket => Kind::Other("socket"),
+        FileType::CharacterDevice | FileType::BlockDevice => Kind::Other("device"),
+        _ => Kind::Other("special file"),
+    };
+    #[allow(clippy::unnecessary_cast)]
+    Meta {
+        id: ident(st),
+        kind,
+        size: st.st_size as u64,
+        mtime_ns: st.st_mtime as i128 * 1_000_000_000 + st.st_mtime_nsec as i128,
+        links: st.st_nlink as u64,
+        writable: st.st_mode & 0o200 != 0,
+    }
+}
+
+pub fn classify(e: &io::Error) -> Errc {
+    match e.raw_os_error() {
+        Some(2) | Some(20) => Errc::NotFound,
+        Some(17) | Some(39) => Errc::Exists,
+        Some(18) => Errc::CrossDevice,
+        Some(22) | Some(95) => Errc::Unsupported,
+        Some(1) | Some(13) => Errc::Permission,
+        Some(28) | Some(122) => Errc::NoSpace,
+        Some(30) => Errc::ReadOnlyFs,
+        Some(40) => Errc::Loop,
+        Some(16) | Some(26) => Errc::Busy,
+        _ => Errc::Other,
+    }
+}
+
+/// Real-file mode is tested on ext4 only; anything else is refused.
+pub fn fs_check(root: &Dir) -> Result<(), String> {
+    let magic = fs_magic(root).map_err(|e| e.to_string())?;
+    if magic != EXT4_MAGIC {
+        return Err(format!("This folder is on a filesystem PALLET hasn't been tested on (type 0x{magic:x}). Real-file mode supports ext4 only."));
+    }
+    Ok(())
+}
+
+pub fn file_meta(f: &File) -> io::Result<Meta> {
+    Ok(meta(&fs::fstat(f).map_err(err)?))
+}
+
+/// Permission bits to give a verified copy.
+pub fn file_mode(f: &File) -> io::Result<u32> {
+    Ok(fs::fstat(f).map_err(err)?.st_mode & 0o777)
+}
+
+/// Positional read that doesn't move the file cursor.
+pub fn read_at(f: &File, buf: &mut [u8], off: u64) -> io::Result<usize> {
+    std::os::unix::fs::FileExt::read_at(f, buf, off)
+}
+
+fn ident(st: &Stat) -> Ident {
     #[allow(clippy::unnecessary_cast)] // st_dev/st_ino widths vary by target
     Ident {
         dev: st.st_dev as u64,
         ino: st.st_ino as u64,
     }
-}
-
-pub fn fingerprint(st: &Stat) -> Fingerprint {
-    Fingerprint {
-        size: st.st_size as u64,
-        mtime_ns: st.st_mtime as i128 * 1_000_000_000 + st.st_mtime_nsec as i128,
-    }
-}
-
-pub fn file_type(st: &Stat) -> FileType {
-    FileType::from_raw_mode(st.st_mode)
 }
 
 /// Opens the root itself. The final component must not be a symlink.
@@ -67,19 +119,23 @@ pub fn open_dir_beneath(root: &OwnedFd, rel: &[String]) -> io::Result<OwnedFd> {
     fs::openat2(root, path, DIR_FLAGS, Mode::empty(), RESOLVE).map_err(err)
 }
 
-pub fn fstat(fd: &OwnedFd) -> io::Result<Stat> {
-    fs::fstat(fd).map_err(err)
+pub fn fstat(fd: &OwnedFd) -> io::Result<Meta> {
+    Ok(meta(&fs::fstat(fd).map_err(err)?))
 }
 
 /// `lstat` of one entry inside an open directory.
-pub fn lstat_at(dir: &OwnedFd, name: &str) -> io::Result<Stat> {
-    fs::statat(dir, name, AtFlags::SYMLINK_NOFOLLOW).map_err(err)
+pub fn lstat_at(dir: &OwnedFd, name: &str) -> io::Result<Meta> {
+    Ok(meta(
+        &fs::statat(dir, name, AtFlags::SYMLINK_NOFOLLOW).map_err(err)?,
+    ))
 }
 
 /// `lstat` of an absolute path. Used only to check whether the root's original
 /// pathname still names the bound directory (S4, root replaced).
-pub fn lstat_path(path: &Path) -> io::Result<Stat> {
-    fs::statat(fs::CWD, path, AtFlags::SYMLINK_NOFOLLOW).map_err(err)
+pub fn lstat_path(path: &Path) -> io::Result<Meta> {
+    Ok(meta(
+        &fs::statat(fs::CWD, path, AtFlags::SYMLINK_NOFOLLOW).map_err(err)?,
+    ))
 }
 
 /// Atomic no-replace rename. `EINVAL` (no RENAME_NOREPLACE support) is returned as
@@ -157,7 +213,8 @@ pub fn open_file_ro(dir: &OwnedFd, name: &str) -> io::Result<File> {
     Ok(File::from(fd))
 }
 
-pub fn fchmod(file: &File, mode: u32) -> io::Result<()> {
+/// Copies permission bits to a new file (the copy matches its original).
+pub fn set_mode(file: &File, mode: u32) -> io::Result<()> {
     fs::fchmod(file, Mode::from_raw_mode(mode)).map_err(err)
 }
 
