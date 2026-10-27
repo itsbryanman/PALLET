@@ -27,7 +27,9 @@ function install() {
     holdOnly([]);
   }
 
-  async function goto(x, y, { tol = 8, slow = 80, reverse: rev = null, careful = false, timeout = 15000 } = {}) {
+  async function goto(x, y, opts) {
+    // Options may arrive as null after JSON transport (WebDriver), so default here.
+    const { tol = 8, slow = 80, reverse: rev = null, careful = false, timeout = 15000 } = opts ?? {};
     const t0 = performance.now();
     // Unless told, reverse when the target is behind and close.
     const f0 = game().fork;
@@ -56,7 +58,8 @@ function install() {
   }
 
   /** Creeps until the fork tip sits on (x, y), steering at the target. */
-  async function dock(x, y, { tol = 6, timeout = 10000 } = {}) {
+  async function dock(x, y, opts) {
+    const { tol = 6, timeout = 10000 } = opts ?? {};
     const t0 = performance.now();
     while (performance.now() - t0 < timeout) {
       const f = game().fork;
@@ -85,7 +88,8 @@ function install() {
     while (performance.now() - t0 < ms) await frame();
   }
 
-  async function tap(code, ms = 250) {
+  async function tap(code, ms) {
+    ms = ms ?? 250;
     key(code, true);
     await frame();
     key(code, false);

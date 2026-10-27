@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The PALLET window may call PALLET's own warehouse commands and nothing else.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-boot",
+    "allow-status",
+    "allow-list-floor",
+    "allow-deliver",
+    "allow-deliver-batch",
+    "allow-undo",
+    "allow-duplicate",
+    "allow-save-incident",
+    "allow-tx-status",
+    "allow-history",
+    "allow-acknowledge",
+    "allow-choose-warehouse",
+    "allow-create-warehouse",
+    "allow-open-sample"
+  ]
+}

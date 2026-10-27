@@ -3,9 +3,10 @@
 // forklift and check the incident report changed nothing.
 import { pilot, where } from "./autopilot.mjs";
 
-export default async function run(page, { shots } = {}) {
+export default async function run(page, { shots, fsSnap, afterDelivery } = {}) {
   const p = pilot(page);
-  const snap = () => page.evaluate(() => window.__pallet.backend.snapshot?.() ? [...window.__pallet.backend.snapshot().entries()] : null);
+  // Demo backend: its virtual inode table. Native: the caller reads the real disk.
+  const snap = fsSnap ?? (() => page.evaluate(() => JSON.stringify([...window.__pallet.backend.snapshot().entries()])));
   const listing = async () => page.evaluate(async () => (await window.__pallet.backend.listFloor(null)).cargo.map((c) => c.name));
   const w = await where(page);
   const hello = w.crates["hello.txt"];
@@ -27,12 +28,6 @@ export default async function run(page, { shots } = {}) {
     throw new Error(`pickup of ${name} failed: ${JSON.stringify(await p.state())}`);
   }
 
-  await page.evaluate(() => {
-    const g = window.__pallet.app.game;
-    window.__ev = [];
-    const orig = g.update.bind(g);
-    g.update = (i, a) => { const e = orig(i, a); for (const x of e) window.__ev.push(`${g.tick}:${x.kind === "refuse" ? x.reason : x.kind}:${g.fork.forkTarget}`); return e; };
-  });
   await pickup("hello.txt");
   let s = await p.state();
   log("picked up hello.txt");
@@ -53,6 +48,7 @@ export default async function run(page, { shots } = {}) {
   log("slip:", slip);
   if (!/Documents\/hello\.txt/.test(slip)) throw new Error("delivery not confirmed");
   if ((await listing()).includes("hello.txt")) throw new Error("hello.txt still in Receiving");
+  if (afterDelivery) await afterDelivery();
   if (shots) await shots("delivered");
 
   // Undo through the Logbook.
@@ -78,7 +74,7 @@ export default async function run(page, { shots } = {}) {
   const report = await page.textContent("#incident");
   if (!/Files damaged\s*0/.test(report)) throw new Error("incident report missing");
   const after = await snap();
-  if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error("tip changed files!");
+  if (before !== after) throw new Error("tip changed files!");
   log("tip ok, files unchanged");
   await page.getByRole("button", { name: "Right the forklift" }).click();
   s = await p.state();
