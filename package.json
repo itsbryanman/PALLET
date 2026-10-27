@@ -1,0 +1,29 @@
+{
+  "name": "pallet",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "build:demo": "tsc --noEmit && vite build --mode demo",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@fontsource/big-shoulders-display": "5.3.0",
+    "@fontsource/big-shoulders-stencil-display": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@tauri-apps/api": "2.12.4",
+    "pixi.js": "8.22.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.0.5",
+    "playwright-core": "1.64.1"
+  }
+}

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Forklift sprite check</title>
+    <style>
+      body { margin: 0; background: #6f6a61; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      // Dev-only: all eight frames around one stationary pivot, at game scale and 4x.
+      import { Application, Container, Graphics } from "pixi.js";
+      import "pixi.js/unsafe-eval";
+      import { ForkliftSprite, loadForkliftAtlas } from "/src/game/forklift-sprite.ts";
+      import { frameAngle } from "/src/sim/direction.ts";
+      const app = new Application();
+      await app.init({ width: 1200, height: 620, background: 0xb8b1a4, antialias: true });
+      document.body.appendChild(app.canvas);
+      const atlas = await loadForkliftAtlas("/");
+      const ring = (cx, cy, r, scale) => {
+        const c = new Container();
+        c.position.set(cx, cy);
+        c.scale.set(scale);
+        app.stage.addChild(c);
+        const g = new Graphics();
+        g.circle(0, 0, r).stroke({ width: 1 / scale, color: 0x5a5248, alpha: 0.5 });
+        c.addChild(g);
+        for (let i = 0; i < 8; i++) {
+          const s = new ForkliftSprite(atlas);
+          const a = frameAngle(i);
+          s.root.position.set(Math.cos(a) * r, Math.sin(a) * r);
+          s.update(a, null);
+          const off = s.forkOffset();
+          const m = new Graphics();
+          m.moveTo(-4, 0).lineTo(4, 0).moveTo(0, -4).lineTo(0, 4).stroke({ width: 1.2 / scale, color: 0xff2020 });
+          m.circle(off.x, off.y, 2.5).stroke({ width: 1 / scale, color: 0x00c8ff });
+          s.root.addChild(m);
+          c.addChild(s.root);
+        }
+        const p = new Graphics().circle(0, 0, 3 / scale).fill(0xff2020);
+        c.addChild(p);
+      };
+      ring(170, 300, 95, 1);
+      ring(760, 310, 70, 3.8);
+      window.__ready = true;
+    </script>
+  </body>
+</html>

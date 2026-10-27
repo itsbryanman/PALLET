@@ -21,6 +21,8 @@ pub struct BayInfo {
     pub id: String,
     pub name: String,
     pub unavailable: Option<String>,
+    /// Regular files directly inside, for the little stack drawn in the bay.
+    pub items: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

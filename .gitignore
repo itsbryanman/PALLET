@@ -5,3 +5,5 @@ dist/
 target/
 *.log
 .DS_Store
+file_*.png
+dist-demo/

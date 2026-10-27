@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PALLET</title>
+    <link rel="icon" href="./mark.svg" type="image/svg+xml" />
+    <meta name="description" content="A file manager where moving a file requires driving a tiny forklift." />
+  </head>
+  <body>
+    <header class="placard" aria-label="Warehouse">
+      <div class="brand">
+        <img src="./mark.svg" alt="" width="30" height="30" />
+        <span class="wordmark">PALLET</span>
+      </div>
+      <div class="where">
+        <p class="mode" id="mode"></p>
+        <p class="path" id="path" title="Warehouse folder"></p>
+        <nav class="crumbs" id="crumbs" aria-label="Floors"></nav>
+      </div>
+      <div class="tools">
+        <button type="button" id="btn-manifest" aria-haspopup="dialog">Manifest</button>
+        <button type="button" id="btn-logbook" aria-haspopup="dialog">Logbook</button>
+        <button type="button" id="btn-warehouse" aria-haspopup="dialog" hidden>Warehouse</button>
+        <button type="button" id="btn-settings" aria-haspopup="dialog">Settings</button>
+        <button type="button" id="btn-mute" aria-pressed="false" title="Mute (M)">Sound on</button>
+      </div>
+    </header>
+
+    <main id="stage" aria-label="Warehouse floor. Use the Manifest to deliver files without driving."></main>
+
+    <section class="dash" aria-label="Forklift">
+      <div class="gauge">
+        <span class="gauge-n" id="speed">0</span>
+        <span class="gauge-u">km/h</span>
+      </div>
+      <div class="level" id="level" role="meter" aria-label="Stability" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="level-tube"><div class="level-bubble" id="bubble"></div></div>
+        <span>Stability</span>
+      </div>
+      <div class="pallet" id="pallet">Forks down, empty</div>
+      <p class="hint" id="hint"></p>
+    </section>
+
+    <section class="pager" id="pager" hidden>
+      <span id="pager-rack"></span>
+      <button type="button" id="rack-prev" aria-label="Previous rack">‹</button>
+      <button type="button" id="rack-next" aria-label="Next rack">›</button>
+      <span id="pager-bay"></span>
+      <button type="button" id="bay-prev" aria-label="Previous bays">‹</button>
+      <button type="button" id="bay-next" aria-label="Next bays">›</button>
+    </section>
+
+    <aside class="slip" id="slip" aria-live="polite" hidden></aside>
+
+    <div class="pedals" id="pedals" hidden aria-label="On-screen controls">
+      <button type="button" data-hold="forward" aria-label="Forward">▲</button>
+      <button type="button" data-hold="left" aria-label="Steer left">◀</button>
+      <button type="button" data-hold="brake" aria-label="Brake">■</button>
+      <button type="button" data-hold="right" aria-label="Steer right">▶</button>
+      <button type="button" data-hold="reverse" aria-label="Reverse">▼</button>
+      <button type="button" data-tap="lift">Lift</button>
+      <button type="button" data-tap="stack">Stack</button>
+      <button type="button" data-tap="enter">Enter</button>
+    </div>
+
+    <div class="paused" id="paused" hidden>
+      <p>Paused. No deliveries can start.</p>
+      <p class="sub">Press Escape to keep driving.</p>
+    </div>
+
+    <dialog class="paper docket" id="docket" aria-labelledby="docket-title"></dialog>
+    <dialog class="paper carbon" id="incident" aria-labelledby="incident-title"></dialog>
+    <dialog class="paper drawer" id="manifest" aria-labelledby="manifest-title"></dialog>
+    <dialog class="paper drawer" id="logbook" aria-labelledby="logbook-title"></dialog>
+    <dialog class="paper drawer" id="settings" aria-labelledby="settings-title"></dialog>
+    <dialog class="paper docket" id="warehouse" aria-labelledby="warehouse-title"></dialog>
+    <dialog class="paper docket" id="recovery" aria-labelledby="recovery-title"></dialog>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

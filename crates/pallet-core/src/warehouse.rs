@@ -663,6 +663,21 @@ impl Warehouse {
         Ok(fd)
     }
 
+    /// Regular files directly inside a bay, capped; display only.
+    fn count_files(&self, path: &[String]) -> u32 {
+        let Ok(fd) = sys::open_dir_beneath(&self.root, path) else {
+            return 0;
+        };
+        let Ok(names) = sys::read_dir(&fd) else {
+            return 0;
+        };
+        names
+            .iter()
+            .take(2000)
+            .filter(|(n, _)| matches!(sys::lstat_at(&fd, n), Ok(st) if sys::file_type(&st) == FileType::RegularFile))
+            .count() as u32
+    }
+
     pub fn list_floor(&mut self, bay: Option<&str>) -> Result<Floor, String> {
         let bay_ref = match bay {
             None => BayRef {
@@ -714,11 +729,17 @@ impl Warehouse {
                             Err(_) => unavailable("can't open"),
                         }
                     };
+                    let items = if reason.is_none() {
+                        self.count_files(&path)
+                    } else {
+                        0
+                    };
                     let bid = self.bay_id_for(path, id);
                     bays.push(BayInfo {
                         id: bid,
                         name,
                         unavailable: reason,
+                        items,
                     });
                 }
                 FileType::RegularFile => {
@@ -779,6 +800,7 @@ impl Warehouse {
             id: root_bay,
             name: root_name,
             unavailable: None,
+            items: 0,
         });
         for i in 1..=bay_ref.path.len() {
             let prefix = bay_ref.path[..i].to_vec();
@@ -790,6 +812,7 @@ impl Warehouse {
                         id,
                         name,
                         unavailable: None,
+                        items: 0,
                     });
                 }
             }
