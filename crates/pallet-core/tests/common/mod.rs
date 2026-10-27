@@ -49,7 +49,20 @@ impl Fx {
     }
 
     pub fn open(&self) -> Warehouse {
-        Warehouse::open(&self.root, false).expect("open warehouse")
+        // After SIGABRT/SIGKILL, Linux releases the child process's flock as
+        // part of teardown. On a busy CI worker that cleanup can become
+        // visible just after `wait` returns, so give the kernel a brief,
+        // bounded chance to release it before declaring the recovery failed.
+        for attempt in 0..20 {
+            match Warehouse::open(&self.root, false) {
+                Ok(w) => return w,
+                Err(e) if e.code == "BUSY" && attempt < 19 => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(e) => panic!("open warehouse: {e:?}"),
+            }
+        }
+        unreachable!("the final open attempt either returned or panicked")
     }
 
     pub fn write(&self, rel: &str, bytes: &[u8]) {
