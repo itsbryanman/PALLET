@@ -4,6 +4,8 @@ Moving files was too easy. I fixed that.
 
 PALLET is a tiny forklift game that moves regular files between folders in one carefully confined warehouse. Drive up, lift a crate, deliver it, and confirm the move. Tip the forklift and you get fictional paperwork; your files do not spill.
 
+![PALLET forklift carrying hello.txt in the virtual warehouse](docs/demo.gif)
+
 > This is pre-release software. Real-file mode is currently implemented and tested only on Linux x86_64 with ext4, Linux 5.19+, and Landlock enabled. macOS, Windows, and the browser run an isolated virtual sample only.
 
 ![PALLET mark](assets/mark.svg)
