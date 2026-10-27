@@ -29,3 +29,17 @@ jobs:
       - run: npm run build
       - run: cargo test --workspace
       - run: cargo test --workspace --features pallet-core/failpoints
+
+  windows-build:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: cargo check --workspace
