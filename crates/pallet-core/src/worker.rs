@@ -5,6 +5,7 @@
 
 use crate::confine;
 use crate::warehouse::{OpenError, Warehouse};
+use std::os::fd::AsFd;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
@@ -18,17 +19,18 @@ pub struct Worker {
 
 impl Worker {
     pub fn open(path: &Path, sample: bool) -> Result<Worker, OpenError> {
-        let root = std::fs::canonicalize(path).map_err(|e| OpenError { code: "ROOT_MISSING", message: format!("Can't open that folder: {e}.") })?;
+        // One handle for everything: policy, the Landlock rule, and the warehouse.
+        let (canonical, root) = Warehouse::bind(path)?;
         let (tx, rx) = mpsc::channel::<Job>();
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), OpenError>>();
         let thread = std::thread::Builder::new()
             .name("pallet-warehouse".into())
             .spawn(move || {
-                if let Err(message) = confine::confine_current_thread(&root) {
+                if let Err(message) = confine::confine_current_thread(root.as_fd()) {
                     let _ = ready_tx.send(Err(OpenError { code: "NO_CONFINEMENT", message }));
                     return;
                 }
-                let mut w = match Warehouse::open(&root, sample) {
+                let mut w = match Warehouse::open_at(canonical, root, sample) {
                     Ok(w) => w,
                     Err(e) => {
                         let _ = ready_tx.send(Err(e));

@@ -12,14 +12,16 @@
 //! mode is refused.
 
 use landlock::{
-    Access, AccessFs, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
+    Access, AccessFs, CompatLevel, Compatible, PathBeneath, Ruleset, RulesetAttr,
     RulesetCreatedAttr, RulesetStatus, ABI,
 };
-use std::path::Path;
+use std::os::fd::AsFd;
 
 /// Restricts the calling thread (and threads it spawns later) to filesystem
-/// access beneath `root`. Other threads of the process are unaffected.
-pub fn confine_current_thread(root: &Path) -> Result<(), String> {
+/// access beneath the directory `root` refers to. Takes the already-open root
+/// handle, not a path, so the rule can't name a different directory than the
+/// one the warehouse uses. Other threads of the process are unaffected.
+pub fn confine_current_thread(root: impl AsFd) -> Result<(), String> {
     let abi = ABI::V2;
     let access = AccessFs::from_all(abi);
     let fail = |e: &dyn std::fmt::Display| format!("Landlock confinement isn't available ({e}). Real-file mode needs Linux 5.19+ with Landlock enabled.");
@@ -29,7 +31,7 @@ pub fn confine_current_thread(root: &Path) -> Result<(), String> {
         .map_err(|e| fail(&e))?
         .create()
         .map_err(|e| fail(&e))?
-        .add_rule(PathBeneath::new(PathFd::new(root).map_err(|e| fail(&e))?, access))
+        .add_rule(PathBeneath::new(root, access))
         .map_err(|e| fail(&e))?
         .restrict_self()
         .map_err(|e| fail(&e))?;

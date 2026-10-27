@@ -203,15 +203,27 @@ impl Warehouse {
     /// Binds a warehouse root. Runs recovery before returning; if anything is
     /// ambiguous the warehouse opens frozen and refuses mutations.
     pub fn open(path: &Path, sample: bool) -> Result<Warehouse, OpenError> {
+        let (canonical, root) = Self::bind(path)?;
+        Self::open_at(canonical, root, sample)
+    }
+
+    /// Resolves and policy-checks a chosen folder, then opens it exactly once
+    /// (no symlink in the last component). Everything after this, including the
+    /// Landlock rule in `worker`, uses this one handle, never the path again.
+    pub fn bind(path: &Path) -> Result<(PathBuf, OwnedFd), OpenError> {
         let canonical = std::fs::canonicalize(path)
             .map_err(|e| open_err("ROOT_MISSING", format!("Can't open that folder: {e}.")))?;
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .and_then(|h| std::fs::canonicalize(h).ok());
         check_root_policy(&canonical, home.as_deref())?;
-
         let root = sys::open_root(&canonical)
             .map_err(|e| open_err("ROOT_MISSING", format!("Can't open that folder: {e}.")))?;
+        Ok((canonical, root))
+    }
+
+    /// Opens a warehouse on a handle from [`Warehouse::bind`].
+    pub fn open_at(canonical: PathBuf, root: OwnedFd, sample: bool) -> Result<Warehouse, OpenError> {
         let st = sys::fstat(&root).map_err(|e| open_err("IO", e.to_string()))?;
         if sys::file_type(&st) != FileType::Directory {
             return Err(open_err("ROOT_REFUSED", "That isn't a folder."));

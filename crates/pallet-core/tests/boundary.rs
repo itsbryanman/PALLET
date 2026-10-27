@@ -137,3 +137,25 @@ fn a_second_worker_on_the_same_warehouse_is_refused_and_the_lock_is_released_on_
     drop(w);
     assert!(Worker::open(&fx.root, false).is_ok());
 }
+
+#[test]
+fn confinement_follows_the_bound_folder_not_its_old_path() {
+    // Swap the folder after it was bound: the rule must cover the original
+    // directory object (now elsewhere), never an impostor at the old path.
+    let fx = Fx::new();
+    let (canonical, root) = pallet_core::warehouse::Warehouse::bind(&fx.root).unwrap();
+    let moved = fx.root.with_file_name("moved-away");
+    fs::rename(&fx.root, &moved).unwrap();
+    fs::create_dir(&fx.root).unwrap();
+    let (impostor, original) = (fx.root.clone(), moved.clone());
+    let (into_impostor, into_original) = std::thread::spawn(move || {
+        use std::os::fd::AsFd;
+        pallet_core::confine::confine_current_thread(root.as_fd()).unwrap();
+        (fs::write(impostor.join("x"), b"x").is_ok(), fs::write(original.join("x"), b"x").is_ok())
+    })
+    .join()
+    .unwrap();
+    assert!(!into_impostor, "the impostor at the old path is outside the rule");
+    assert!(into_original, "the bound directory is the one that's allowed");
+    let _ = canonical;
+}
