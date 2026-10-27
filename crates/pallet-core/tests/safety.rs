@@ -1,6 +1,6 @@
 //! In-process safety tests against the real Linux adapter on ext4.
 //! Each test checks the outside sentinel and, where relevant, the exactly-one invariant.
-#![cfg(target_os = "linux")]
+#![cfg(all(target_os = "linux", feature = "failpoints"))]
 
 mod common;
 
